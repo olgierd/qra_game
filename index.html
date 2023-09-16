@@ -87,6 +87,7 @@
     }).addTo(map);
 
     map.on('click', onMapClick);
+    map.doubleClickZoom.disable();
 
     function onMapClick(e) {
         if(gameStarted) checkClick(targetLocator, e.latlng);
