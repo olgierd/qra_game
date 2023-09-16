@@ -64,8 +64,9 @@
 
     const degToRad = deg => (deg % 360) * Math.PI / 180;
 
-    const distFromLoc = (loc, remote) => {
+    const distFromLoc = (loc, remoteloc) => {
         const fromCoords = locatorToLatLng(loc);
+        const remote = locatorToLatLng(remoteloc);
         const dLat = degToRad(remote[0] - fromCoords[0]); 
         const dLon = degToRad(remote[1] - fromCoords[1]);
         const fromLat = degToRad(fromCoords[0]);
@@ -141,6 +142,45 @@
         }
     }
 
+    function getDirectNeighbors(loc) {
+        clickedLocCenter = locatorToLatLng(loc);
+        neigh = []
+        neigh.push(latLngToLocator(clickedLocCenter[0]-1, clickedLocCenter[1]-2));
+        neigh.push(latLngToLocator(clickedLocCenter[0]-1, clickedLocCenter[1]-0));
+        neigh.push(latLngToLocator(clickedLocCenter[0]-1, clickedLocCenter[1]+2));
+
+        neigh.push(latLngToLocator(clickedLocCenter[0]-0, clickedLocCenter[1]-2));
+        neigh.push(latLngToLocator(clickedLocCenter[0]-0, clickedLocCenter[1]+2));
+
+        neigh.push(latLngToLocator(clickedLocCenter[0]+1, clickedLocCenter[1]-2));
+        neigh.push(latLngToLocator(clickedLocCenter[0]+1, clickedLocCenter[1]-0));
+        neigh.push(latLngToLocator(clickedLocCenter[0]+1, clickedLocCenter[1]+2));
+        return neigh;
+    }
+
+    function get2ndNeighbors(loc) {
+        clickedLocCenter = locatorToLatLng(loc);
+        neigh = []
+        // 3 below
+        neigh.push(latLngToLocator(clickedLocCenter[0]-2, clickedLocCenter[1]-2));
+        neigh.push(latLngToLocator(clickedLocCenter[0]-2, clickedLocCenter[1]-0));
+        neigh.push(latLngToLocator(clickedLocCenter[0]-2, clickedLocCenter[1]+2));
+        // 3 over
+        neigh.push(latLngToLocator(clickedLocCenter[0]+2, clickedLocCenter[1]-2));
+        neigh.push(latLngToLocator(clickedLocCenter[0]+2, clickedLocCenter[1]-0));
+        neigh.push(latLngToLocator(clickedLocCenter[0]+2, clickedLocCenter[1]+2));
+        // 3 to the left
+        neigh.push(latLngToLocator(clickedLocCenter[0]-1, clickedLocCenter[1]-4));
+        neigh.push(latLngToLocator(clickedLocCenter[0]-0, clickedLocCenter[1]-4));
+        neigh.push(latLngToLocator(clickedLocCenter[0]+1, clickedLocCenter[1]-4));
+        // 3 to the right
+        neigh.push(latLngToLocator(clickedLocCenter[0]-1, clickedLocCenter[1]+4));
+        neigh.push(latLngToLocator(clickedLocCenter[0]-0, clickedLocCenter[1]+4));
+        neigh.push(latLngToLocator(clickedLocCenter[0]+1, clickedLocCenter[1]+4));
+        
+        return neigh;
+    }
+
     function checkClick(targetLoc, clickedPoint) {
         clearMarker();
         counter++;
@@ -148,17 +188,21 @@
         clickedLoc = latLngToLocator(clickedPoint.lat, clickedPoint.lng);
         if(targetLoc == clickedLoc) {
             message = `Last: <b>${targetLoc}</b>: PERFECT!`;
-            points = 1000;
+            points = 3;
             markLocator(clickedLoc, true);
         }
         else {
-            err = distFromLoc(targetLoc, [clickedPoint.lat, clickedPoint.lng]);
-            points = 1000 - ((err < 1000)? err : 1000);
-            message = `Last: <b>${targetLoc}</b>: -${err} km.`;
+            neigh_dir = getDirectNeighbors(targetLoc);
+            neigh_2nd = get2ndNeighbors(targetLoc);
+            if(neigh_dir.indexOf(clickedLoc) >= 0) points = 2;
+            else if(neigh_2nd.indexOf(clickedLoc) >= 0) points = 1;
+            else points = 0;
+            message = `Last: <b>${targetLoc}</b>: ${clickedLoc}`;
             markLocator(targetLoc, false);
         }
         score += points;
-        gamehistory.push(`<b>${targetLoc}</b> (click: ${clickedLoc}): ${points} pts.`);
+        colors = {3: 'green', 2: 'rgb(111, 104, 0)', 1: 'orange', 0: 'red' }
+        gamehistory.push(`<b>${targetLoc}</b> (click: <b style='color: ${colors[points]}'>${clickedLoc}</b>): ${points} pts.`);
 
         stepGame();
     }
@@ -193,7 +237,7 @@
             // alert(`Score: ${score} (${Math.round((score/gameLength)/10)}%).\n\n${gamehistory.join('\n')}`);
             nextlocbox.innerHTML = "<p><b><u>GAME OVER</u></b></p>"
             nextlocbox.innerHTML += `<p><b>Time:</b> ${gameplayTime} s.</p>`
-            // nextlocbox.innerHTML += `<p>Score: ${score} (${Math.round((score/gameLength)/10)}%).</p>`
+            scorebox.innerHTML += `<p>Score: ${score}/${3*gameLength}.</p>`
             nextlocbox.innerHTML += `${gamehistory.join('<br>')}`;
             lastlocbox.innerHTML = '';
             message = '';
