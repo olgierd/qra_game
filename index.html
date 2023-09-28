@@ -3,9 +3,9 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    
+
     <title>QRA Game</title>
-    
+
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 
@@ -15,7 +15,7 @@
             margin: 0;
         }
         .leaflet-container {
-            cursor: default !important;
+            cursor: crosshair !important;
         }
         #box{
             position: absolute;
@@ -23,9 +23,9 @@
             z-index: 9999;
             text-align: center;
             width: 250px;
-            left: 50%;
+            right: 0%;
             margin-bottom: 20px;
-            margin-left: -75px; /* half of the width */
+            margin-right: 20px;
             background-color: white;
             border-radius: 10px;
             border-style: solid;
@@ -36,7 +36,7 @@
         }
     </style>
 
-    
+
 </head>
 <body onload="resetGame()">
 
@@ -67,13 +67,13 @@
     const distFromLoc = (loc, remoteloc) => {
         const fromCoords = locatorToLatLng(loc);
         const remote = locatorToLatLng(remoteloc);
-        const dLat = degToRad(remote[0] - fromCoords[0]); 
+        const dLat = degToRad(remote[0] - fromCoords[0]);
         const dLon = degToRad(remote[1] - fromCoords[1]);
         const fromLat = degToRad(fromCoords[0]);
         const toLat = degToRad(remote[0]);
         const a = Math.pow(Math.sin(dLat / 2), 2) + Math.pow(Math.sin(dLon / 2), 2) * Math.cos(fromLat) * Math.cos(toLat);
         const b = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-   
+
         return Math.round(b * 6371);
     };
 
@@ -91,19 +91,43 @@
 
     function onMapClick(e) {
         if(gameStarted) checkClick(targetLocator, e.latlng);
-        else { gameStarted = 1; startTime = performance.now(); clearMarker(); stepGame(); }
+        else { gameStarted = 1; startTime = performance.now(); clearMarkers(); stepGame(); }
     }
+
+    layer_grid = draw_grid();
+    layer_grid_learning = draw_grid_learning();
 
     // draw grid
-    bound_left = -12; bound_right = 36; bound_bottom = 35; bound_top = 65; 
-    for (let lat = bound_bottom; lat<=bound_top; lat+=1) {
-        var latlngs = [ [lat, bound_left], [lat, bound_right] ];
-        L.polyline(latlngs, {color: 'gray', weight: 1}).addTo(map);
+    function draw_grid() {
+        let grid = [];
+        bound_left = -20; bound_right = 40; bound_bottom = 30; bound_top = 70;
+        for (let lat = bound_bottom; lat<=bound_top; lat+=1) {
+            var latlngs = [ [lat, bound_left], [lat, bound_right] ];
+            grid.push(L.polyline(latlngs, {color: 'gray', weight: 1})); //.addTo(map);
+        }
+
+        for (let lon = bound_left; lon<=bound_right; lon+=2) {
+            var latlngs = [ [bound_bottom, lon], [bound_top, lon] ];
+            grid.push(L.polyline(latlngs, {color: 'gray', weight: 1}));//.addTo(map);
+        }
+
+        return L.layerGroup(grid);
     }
 
-    for (let lon = bound_left; lon<=bound_right; lon+=2) {
-        var latlngs = [ [bound_bottom, lon], [bound_top, lon] ];
-        L.polyline(latlngs, {color: 'gray', weight: 1}).addTo(map);
+    function draw_grid_learning() {
+        let grid = []
+        bound_left = -20; bound_right = 40; bound_bottom = 30; bound_top = 70;
+        for (let lat = bound_bottom; lat<=bound_top; lat+=10) {
+            var latlngs = [ [lat, bound_left], [lat, bound_right] ];
+            grid.push(L.polyline(latlngs, {color: 'gray', weight: 3})); //.addTo(map);
+        }
+
+        for (let lon = bound_left; lon<=bound_right; lon+=20) {
+            var latlngs = [ [bound_bottom, lon], [bound_top, lon] ];
+            grid.push(L.polyline(latlngs, {color: 'gray', weight: 3})); //.addTo(map);
+        }
+
+        return L.layerGroup(grid);
     }
 
     //////////////////////////// Game Logic
@@ -122,25 +146,41 @@
     message = "";
     gamehistory = [];
     startTime = 0;
-    marker = null;
-    
+    markers = [];
+    level = "1";
+
     function resetGame() {
         usedlocs = [];
         score = 0;
         counter = 0;
         targetLocator = "";
         gamehistory = [];
-        document.getElementById("lastlocbox").innerHTML = "<b onclick='stepGame();'>Click on map to start!</b>";
+        document.getElementById("lastlocbox").innerHTML = "<b onclick='stepGame();'>Click on map to start!</b><br><br>";
+        document.getElementById("lastlocbox").innerHTML += '<select name="level" id="level" onchange="setLevel()">><option value="0">Easy</option><option value="1">Medium</option><option value="2">Hard</option></select>'
+        layer_grid.removeFrom(map);
+        layer_grid_learning.removeFrom(map);
+        document.getElementById("level").selectedIndex = level;
+        setLevel();
     }
 
     function getRandomLoc() {
         while(1) {
             rloc = locs[Math.floor(Math.random() * locs.length)];
             if(usedlocs.indexOf(rloc) == -1) {
-                usedlocs.push(rloc);   
+                usedlocs.push(rloc);
                 return rloc;
             }
         }
+    }
+
+    function setLevel() {
+        level = document.getElementById("level").value;
+        layer_grid.removeFrom(map);
+        layer_grid_learning.removeFrom(map);
+
+        if(level == "0") { layer_grid.addTo(map); layer_grid_learning.addTo(map); }
+        if(level == "1") { layer_grid.addTo(map);  }
+        if(level == "2") { }
     }
 
     function getDirectNeighbors(loc) {
@@ -178,19 +218,19 @@
         neigh.push(latLngToLocator(clickedLocCenter[0]-1, clickedLocCenter[1]+4));
         neigh.push(latLngToLocator(clickedLocCenter[0]-0, clickedLocCenter[1]+4));
         neigh.push(latLngToLocator(clickedLocCenter[0]+1, clickedLocCenter[1]+4));
-        
+
         return neigh;
     }
 
     function checkClick(targetLoc, clickedPoint) {
-        clearMarker();
+        clearMarkers();
         counter++;
 
         clickedLoc = latLngToLocator(clickedPoint.lat, clickedPoint.lng);
         if(targetLoc == clickedLoc) {
             message = `Last: <b>${targetLoc}</b>: PERFECT!`;
             points = 3;
-            markLocator(clickedLoc, true);
+            markLocator(clickedLoc, "ok");
         }
         else {
             neigh_dir = getDirectNeighbors(targetLoc);
@@ -199,7 +239,8 @@
             else if(neigh_2nd.indexOf(clickedLoc) >= 0) points = 1;
             else points = 0;
             message = `Last: <b>${targetLoc}</b>: ${clickedLoc}`;
-            markLocator(targetLoc, false);
+            markLocator(targetLoc, "wrong");
+            markLocator(clickedLoc, "clicked");
         }
         score += points;
         colors = {3: 'green', 2: 'rgb(111, 104, 0)', 1: 'orange', 0: 'red' }
@@ -209,25 +250,27 @@
     }
 
     function markLocator(locator, correct) {
-        color = correct?'green':'red';
+        color = {"ok": "green", "wrong": "red", clicked: "black" }[correct];
         c = locatorToLatLng(locator);
-        a0 = [c[0]-0.5, c[1]-1]; 
-        a1 = [c[0]-0.5, c[1]+1]; 
-        a2 = [c[0]+0.5, c[1]+1]; 
-        a3 = [c[0]+0.5, c[1]-1]; 
+        a0 = [c[0]-0.5, c[1]-1];
+        a1 = [c[0]-0.5, c[1]+1];
+        a2 = [c[0]+0.5, c[1]+1];
+        a3 = [c[0]+0.5, c[1]-1];
         marker = L.polyline([a0,a1,a2,a3,a0], {color: color, fill: true, fillColor: color, fillOpacity: 0.2, weight: 3});
         marker.addTo(map);
+        markers.push(marker);
     }
 
-    function clearMarker() {
-        if(marker) marker.remove(map);
+    function clearMarkers() {
+        markers.forEach((m) => m.remove(map));
+        markers = [];
     }
 
     function stepGame() {
         scorebox = document.getElementById("scorebox");
         nextlocbox = document.getElementById("nextlocbox");
         lastlocbox = document.getElementById("lastlocbox");
-        
+
         lastlocbox.innerHTML = `<p>${message}<p>`
         scorebox.innerHTML = `<p><b>Score:</b> ${score} (${counter}/${gameLength})<p>`
         nextlocbox.innerHTML = "";
@@ -235,7 +278,6 @@
         if(counter == gameLength) {
             gameStarted = 0;
             gameplayTime = Math.round((performance.now() - startTime)/1000);
-            // alert(`Score: ${score} (${Math.round((score/gameLength)/10)}%).\n\n${gamehistory.join('\n')}`);
             nextlocbox.innerHTML = "<p><b><u>GAME OVER</u></b></p>"
             nextlocbox.innerHTML += `<p><b>Time:</b> ${gameplayTime} s.</p>`
             scorebox.innerHTML += `<p>Score: ${score}/${3*gameLength}.</p>`
