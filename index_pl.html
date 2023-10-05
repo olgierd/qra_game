@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    
+    <title>QRA Game</title>
+    
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+
+    <style>
+        html, body {
+            height: 100%;
+            margin: 0;
+        }
+        .leaflet-container {
+            cursor: crosshair !important;
+        }
+        #box{
+            position: absolute;
+            bottom: 0;
+            z-index: 9999;
+            text-align: center;
+            width: 250px;
+            right: 0%;
+            margin-bottom: 20px;
+            margin-right: 20px; /* half of the width */
+            background-color: white;
+            border-radius: 10px;
+            border-style: solid;
+        }
+        .nextloc {
+            color: red;
+            font-size: large;
+        }
+    </style>
+
+    
+</head>
+<body onload="resetGame()">
+
+<div id="box"><p id="nextlocbox"></p><p id="scorebox"></p><p id="lastlocbox"></p></div>
+<div id="map" style="width: 100%; height: 100%;"></div>
+<script>
+
+    document.addEventListener("keypress", function onPress(event) {if (event.key === "r") { resetGame(); }});
+    
+    ///////////////////////// QTH locator utils
+    const latLngToLocator = (lat, lng) => {
+        lat += 90; lng += 180;
+        const c1 = String.fromCharCode(65 + (Math.floor((lng) / 20)));
+        const c2 = String.fromCharCode(65 + (Math.floor((lat) / 10)));
+        const c3 = Math.floor(lng % 20 / 2);
+        const c4 = Math.floor(lat % 10);
+        return c1+c2+c3+c4;
+    };
+
+    const locatorToLatLng = (locatorString) => {
+        const fieldLng = (locatorString[0].toUpperCase().charCodeAt(0)-65) * 20;
+        const fieldLat = (locatorString[1].toUpperCase().charCodeAt(0)-65) * 10;
+        const squareLng = Number.parseInt(locatorString[2]) * 2;
+        const squareLat = Number.parseInt(locatorString[3]);
+        return [ fieldLat + squareLat - 90+0.5, fieldLng + squareLng - 180+1];
+    };
+
+    const degToRad = deg => (deg % 360) * Math.PI / 180;
+
+    const distFromLoc = (loc, remoteloc) => {
+        const fromCoords = locatorToLatLng(loc);
+        const remote = locatorToLatLng(remoteloc);
+        const dLat = degToRad(remote[0] - fromCoords[0]); 
+        const dLon = degToRad(remote[1] - fromCoords[1]);
+        const fromLat = degToRad(fromCoords[0]);
+        const toLat = degToRad(remote[0]);
+        const a = Math.pow(Math.sin(dLat / 2), 2) + Math.pow(Math.sin(dLon / 2), 2) * Math.cos(fromLat) * Math.cos(toLat);
+        const b = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+   
+        return Math.round(b * 6371);
+    };
+
+
+    //////////////////////////// Map stuff
+    const map = L.map('map').setView([52, 20], 6);
+    L.DomUtil.addClass(map._container,'crosshair-cursor-enabled');
+
+    const tiles = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 7, attribution: '&copy; <a href="http://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+    }).addTo(map);
+
+    map.on('click', onMapClick);
+    map.doubleClickZoom.disable();
+
+    function onMapClick(e) {
+        if(gameStarted) checkClick(targetLocator, e.latlng);
+        else { gameStarted = 1; startTime = performance.now(); clearMarkers(); stepGame(); }
+    }
+
+    layer_grid = draw_grid();
+    layer_grid_learning = draw_grid_learning();
+
+    // draw grid
+    function draw_grid() {
+        let grid = [];
+        bound_left = -20; bound_right = 40; bound_bottom = 30; bound_top = 70; 
+        for (let lat = bound_bottom; lat<=bound_top; lat+=1) {
+            var latlngs = [ [lat, bound_left], [lat, bound_right] ];
+            grid.push(L.polyline(latlngs, {color: 'gray', weight: 1})); //.addTo(map);
+        }
+
+        for (let lon = bound_left; lon<=bound_right; lon+=2) {
+            var latlngs = [ [bound_bottom, lon], [bound_top, lon] ];
+            grid.push(L.polyline(latlngs, {color: 'gray', weight: 1}));//.addTo(map);
+        }
+
+        return L.layerGroup(grid);
+    }
+
+    function draw_grid_learning() {
+        let grid = []
+        bound_left = -20; bound_right = 40; bound_bottom = 30; bound_top = 70; 
+        for (let lat = bound_bottom; lat<=bound_top; lat+=10) {
+            var latlngs = [ [lat, bound_left], [lat, bound_right] ];
+            grid.push(L.polyline(latlngs, {color: 'gray', weight: 3})); //.addTo(map);
+        }
+
+        for (let lon = bound_left; lon<=bound_right; lon+=20) {
+            var latlngs = [ [bound_bottom, lon], [bound_top, lon] ];
+            grid.push(L.polyline(latlngs, {color: 'gray', weight: 3})); //.addTo(map);
+        }
+
+        return L.layerGroup(grid);
+    }
+
+    //////////////////////////// Game Logic
+
+    // consts
+    
+    locs = "JO70,JO71,JO72,JO73,JO74,JO80,JO81,JO82,JO83,JO84,JN99,JO90,JO91,JO92,JO93,JO94,KN09,KO00,KO01,KO02,KO03,KO04,KN19,KO10,KO11,KO12,KO13,KO14".split(",")
+    gameLength = 15;
+
+    // params
+    usedlocs = [];
+    score = 0;
+    counter = 0;
+    gameStarted = 0;
+    targetLocator = "";
+    message = "";
+    gamehistory = [];
+    startTime = 0;
+    markers = [];
+    level = "1";
+    levels = {0: "Easy", 1: "Medium", 2: "Hard", 3: "Contest"}
+    
+    function resetGame() {
+        // clearMarkers();
+        gameStarted = 0;
+        usedlocs = [];
+        score = 0;
+        counter = 0;
+        targetLocator = "";
+        gamehistory = [];
+        // document.getElementById("nextlocbox").innerHTML = "";
+        document.getElementById("lastlocbox").innerHTML = "<b onclick='stepGame();'>Click on map to start!</b><br><br>";
+        document.getElementById("lastlocbox").innerHTML += '<select name="level" id="level" onchange="setLevel()">><option value="0">Easy</option><option value="1">Medium</option><option value="2">Hard</option><option value="3">Contest</option></select>'
+        layer_grid.removeFrom(map);
+        layer_grid_learning.removeFrom(map);
+        document.getElementById("level").selectedIndex = level;
+        setLevel();
+    }
+
+    function getRandomLoc() {
+        while(1) {
+            rloc = locs[Math.floor(Math.random() * locs.length)];
+            if(usedlocs.indexOf(rloc) == -1) {
+                usedlocs.push(rloc);   
+                return rloc;
+            }
+        }
+    }
+
+    function setLevel() {
+        level = document.getElementById("level").value;
+        layer_grid.removeFrom(map);
+        layer_grid_learning.removeFrom(map);
+
+        if(level == "0") { layer_grid.addTo(map); layer_grid_learning.addTo(map); }
+        if(level == "1") { layer_grid.addTo(map);  }
+        if(level == "2") { }
+    }
+
+    function getDirectNeighbors(loc) {
+        clickedLocCenter = locatorToLatLng(loc);
+        neigh = []
+        neigh.push(latLngToLocator(clickedLocCenter[0]-1, clickedLocCenter[1]-2));
+        neigh.push(latLngToLocator(clickedLocCenter[0]-1, clickedLocCenter[1]-0));
+        neigh.push(latLngToLocator(clickedLocCenter[0]-1, clickedLocCenter[1]+2));
+
+        neigh.push(latLngToLocator(clickedLocCenter[0]-0, clickedLocCenter[1]-2));
+        neigh.push(latLngToLocator(clickedLocCenter[0]-0, clickedLocCenter[1]+2));
+
+        neigh.push(latLngToLocator(clickedLocCenter[0]+1, clickedLocCenter[1]-2));
+        neigh.push(latLngToLocator(clickedLocCenter[0]+1, clickedLocCenter[1]-0));
+        neigh.push(latLngToLocator(clickedLocCenter[0]+1, clickedLocCenter[1]+2));
+        return neigh;
+    }
+
+    function get2ndNeighbors(loc) {
+        clickedLocCenter = locatorToLatLng(loc);
+        neigh = []
+        // 3 below
+        neigh.push(latLngToLocator(clickedLocCenter[0]-2, clickedLocCenter[1]-2));
+        neigh.push(latLngToLocator(clickedLocCenter[0]-2, clickedLocCenter[1]-0));
+        neigh.push(latLngToLocator(clickedLocCenter[0]-2, clickedLocCenter[1]+2));
+        // 3 over
+        neigh.push(latLngToLocator(clickedLocCenter[0]+2, clickedLocCenter[1]-2));
+        neigh.push(latLngToLocator(clickedLocCenter[0]+2, clickedLocCenter[1]-0));
+        neigh.push(latLngToLocator(clickedLocCenter[0]+2, clickedLocCenter[1]+2));
+        // 3 to the left
+        neigh.push(latLngToLocator(clickedLocCenter[0]-1, clickedLocCenter[1]-4));
+        neigh.push(latLngToLocator(clickedLocCenter[0]-0, clickedLocCenter[1]-4));
+        neigh.push(latLngToLocator(clickedLocCenter[0]+1, clickedLocCenter[1]-4));
+        // 3 to the right
+        neigh.push(latLngToLocator(clickedLocCenter[0]-1, clickedLocCenter[1]+4));
+        neigh.push(latLngToLocator(clickedLocCenter[0]-0, clickedLocCenter[1]+4));
+        neigh.push(latLngToLocator(clickedLocCenter[0]+1, clickedLocCenter[1]+4));
+        
+        return neigh;
+    }
+
+    function checkClick(targetLoc, clickedPoint) {
+        clearMarkers();
+        counter++;
+
+        clickedLoc = latLngToLocator(clickedPoint.lat, clickedPoint.lng);
+        if(targetLoc == clickedLoc) {
+            message = (level<3)? `Last: <b>${targetLoc}</b>: ${clickedLoc}` : "";
+            points = 3;
+            markLocator(clickedLoc, level==3?"clicked":"ok");
+        }
+        else {
+            neigh_dir = getDirectNeighbors(targetLoc);
+            neigh_2nd = get2ndNeighbors(targetLoc);
+            if(neigh_dir.indexOf(clickedLoc) >= 0) points = 2;
+            else if(neigh_2nd.indexOf(clickedLoc) >= 0) points = 1;
+            else points = 0;
+            
+            if(level < 3) { 
+                markLocator(targetLoc, "wrong"); 
+                message = `Last: <b>${targetLoc}</b>: ${clickedLoc}`;
+            }
+            else {
+                message = "";
+            }
+            markLocator(clickedLoc, "clicked");
+        }
+        score += points;
+        colors = {3: 'green', 2: 'rgb(111, 104, 0)', 1: 'orange', 0: 'red' }
+        gamehistory.push(`<b>${targetLoc}</b> (click: <b style='color: ${colors[points]}'>${clickedLoc}</b>): ${points} pts.`);
+
+        stepGame();
+    }
+
+    function markLocator(locator, correct) {
+        color = {"ok": "green", "wrong": "red", clicked: "black" }[correct];
+        c = locatorToLatLng(locator);
+        a0 = [c[0]-0.5, c[1]-1]; 
+        a1 = [c[0]-0.5, c[1]+1]; 
+        a2 = [c[0]+0.5, c[1]+1]; 
+        a3 = [c[0]+0.5, c[1]-1]; 
+        marker = L.polyline([a0,a1,a2,a3,a0], {color: color, fill: true, fillColor: color, fillOpacity: 0.2, weight: 3});
+        marker.addTo(map);
+        markers.push(marker);
+    }
+
+    function clearMarkers() {
+        markers.forEach((m) => m.remove(map));
+        markers = [];
+    }
+
+    function stepGame() {
+        scorebox = document.getElementById("scorebox");
+        nextlocbox = document.getElementById("nextlocbox");
+        lastlocbox = document.getElementById("lastlocbox");
+        
+        lastlocbox.innerHTML = `<p>${message}<p>`
+        scorebox.innerHTML = `<p><b>Score:</b> ${score} (${counter}/${gameLength})<p>`
+        nextlocbox.innerHTML = "";
+
+        if(counter == gameLength) {
+            
+            gameplayTime = Math.round((performance.now() - startTime)/1000);
+            // re: ${score} (${Math.round((score/gameLength)/10)}%).\n\n${gamehistory.join('\n')}`);
+            nextlocbox.innerHTML = "<p><b><u>GAME OVER</u></b></p>"
+            nextlocbox.innerHTML += `<p><b>Time:</b> ${gameplayTime} s.<br><b>Level:</b> ${levels[parseInt(level)]}</p>`
+            nextlocbox.innerHTML += `${gamehistory.join('<br>')}`;
+            
+            scorebox.innerHTML = `<p>Score: ${score}/${3*gameLength}.</p>`
+
+            resetGame();
+            return;
+        }
+
+        targetLocator = getRandomLoc();
+
+        lastlocbox.innerHTML = `<p>${message}<p>`
+        scorebox.innerHTML = `<p><b>Score:</b> ${score} (${counter}/${gameLength})<p>`
+        nextlocbox.innerHTML = `<p>Click on <u><b class="nextloc">${targetLocator}</b><u>.<p>`
+    }
+
+</script>
+
+
+
+</body>
+</html>
